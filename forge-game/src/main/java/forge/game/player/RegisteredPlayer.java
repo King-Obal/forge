@@ -197,6 +197,9 @@ public class RegisteredPlayer {
     public List<PaperCard> getCommanders() {
         return commanders;
     }
+    public void setCommanders(List<PaperCard> newCommanders) {
+        this.commanders = new java.util.ArrayList<>(newCommanders);
+    }
     public void assignCommander() {
     	commanders = currentDeck.getCommanders();
     }

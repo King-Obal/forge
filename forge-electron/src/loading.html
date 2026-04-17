@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Forge MTG — Loading</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f1923;
+      color: #c8a96e;
+      font-family: 'Segoe UI', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+    }
+    h1 { font-size: 2.4rem; letter-spacing: 6px; text-transform: uppercase; color: #d4af6f; }
+    p  { font-size: 0.95rem; color: #6b7c8d; letter-spacing: 1px; }
+
+    .spinner {
+      width: 48px; height: 48px;
+      border: 3px solid #1e2f3d;
+      border-top-color: #c8a96e;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status {
+      font-size: 0.8rem;
+      color: #4a5a6a;
+      font-family: monospace;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Forge</h1>
+  <div class="spinner"></div>
+  <p>Loading card database...</p>
+  <div class="status" id="status">Initializing Forge engine (~30 seconds on first load)</div>
+
+  <script>
+    let dots = 0;
+    setInterval(() => {
+      dots = (dots + 1) % 4;
+      document.getElementById('status').textContent =
+        'Initializing Forge engine' + '.'.repeat(dots);
+    }, 600);
+  </script>
+</body>
+</html>

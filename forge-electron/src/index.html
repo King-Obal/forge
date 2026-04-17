@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://cards.scryfall.io https://svgs.scryfall.io; connect-src 'self' https://api.scryfall.com">
+  <title>Forge MTG</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <span class="logo">FORGE</span>
+    <nav class="tabs">
+      <button class="tab active" data-view="simulate">Simulate</button>
+      <button class="tab" data-view="decks">Decks</button>
+      <button class="tab" data-view="play">Play</button>
+      <button class="tab" data-view="builder">Builder</button>
+    </nav>
+    <button id="btn-import-moxfield" class="btn-import">⬇ Import Deck</button>
+    <span class="version">v2.0.12</span>
+  </header>
+
+  <!-- Import modal -->
+  <div id="modal-import" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Import Deck</h3>
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="text">Paste Text</button>
+        <button class="modal-tab" data-tab="moxfield">Moxfield URL</button>
+      </div>
+
+      <!-- Text tab -->
+      <div class="modal-tab-content" id="tab-text">
+        <input id="text-deck-name" type="text" class="modal-input" placeholder="Deck name…">
+        <textarea id="deck-text-input" class="deck-textarea"
+                  placeholder="1 Arbor Elf&#10;1 Birds of Paradise&#10;...&#10;&#10;1 Commander Name"></textarea>
+        <div id="parse-preview" class="parse-preview"></div>
+      </div>
+
+      <!-- Moxfield tab -->
+      <div class="modal-tab-content hidden" id="tab-moxfield">
+        <p class="modal-hint">Paste a Moxfield deck URL:</p>
+        <input id="moxfield-url" type="text" class="modal-input"
+               placeholder="https://moxfield.com/decks/…">
+      </div>
+
+      <div class="modal-error hidden" id="modal-error"></div>
+      <div class="modal-actions">
+        <button id="btn-modal-cancel" class="btn-secondary">Cancel</button>
+        <button id="btn-modal-import" class="btn-primary">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card hover tooltip -->
+  <div id="card-tooltip"><img id="card-tooltip-img" src="" alt=""></div>
+
+  <!-- Main content area -->
+  <main class="content">
+
+    <!-- ── SIMULATE VIEW ─────────────────────────────── -->
+    <section class="view active" id="view-simulate">
+      <div class="panel setup-panel">
+        <h2>AI vs AI Simulation</h2>
+
+        <div class="match-setup">
+          <div class="player-slot">
+            <label>Player 1 — Deck</label>
+            <select id="deck1" class="deck-select">
+              <option value="">Loading decks…</option>
+            </select>
+          </div>
+
+          <div class="vs-badge">VS</div>
+
+          <div class="player-slot">
+            <label>Player 2 — Deck</label>
+            <select id="deck2" class="deck-select">
+              <option value="">Loading decks…</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="format-row">
+          <label>Format</label>
+          <select id="format" class="format-select">
+            <option value="Constructed">Constructed</option>
+            <option value="Commander">Commander</option>
+          </select>
+          <label>Timeout (s)</label>
+          <input id="timeout" type="number" value="120" min="10" max="600" class="timeout-input">
+        </div>
+
+        <button id="btn-simulate" class="btn-primary">▶ Run Simulation</button>
+      </div>
+
+      <!-- Results -->
+      <div class="panel result-panel hidden" id="result-panel">
+        <div class="result-header">
+          <div id="result-winner" class="winner-badge"></div>
+          <div id="result-meta" class="result-meta"></div>
+          <button id="btn-copy-log" class="btn-secondary">Copy Log</button>
+        </div>
+        <div class="log-container">
+          <div id="game-log" class="game-log"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── DECKS VIEW ────────────────────────────────── -->
+    <section class="view" id="view-decks">
+      <div class="deck-view-toolbar">
+        <select id="deck-view-format" class="deck-view-ctrl">
+          <option value="Commander">Commander</option>
+          <option value="Constructed">Constructed</option>
+        </select>
+        <select id="deck-view-select" class="deck-view-ctrl deck-view-select">
+          <option value="">— Select a deck —</option>
+        </select>
+        <div class="group-btns">
+          <span class="group-label">Group:</span>
+          <button class="group-btn active" data-group="type">Type</button>
+          <button class="group-btn" data-group="cmc">CMC</button>
+          <button class="group-btn" data-group="color">Color</button>
+        </div>
+      </div>
+      <div id="deck-grid" class="deck-grid">
+        <div class="deck-empty">Select a deck to view its cards.</div>
+      </div>
+    </section>
+
+    <!-- ── PLAY VIEW ─────────────────────────────────── -->
+    <section class="view" id="view-play">
+
+      <!-- Setup panel (shown before game starts) -->
+      <div id="play-setup" class="panel play-setup-panel">
+        <h2>Interactive Play</h2>
+        <div class="play-setup-row">
+          <div class="player-slot">
+            <label>Player 1 — Deck</label>
+            <div class="deck-select-row">
+              <select id="play-deck1" class="deck-select"></select>
+              <button class="btn-import-inline" data-target="1" title="Importer un deck">＋</button>
+            </div>
+          </div>
+          <div class="vs-badge">VS</div>
+          <div class="player-slot">
+            <label>Player 2 — Deck</label>
+            <div class="deck-select-row">
+              <select id="play-deck2" class="deck-select"></select>
+              <button class="btn-import-inline" data-target="2" title="Importer un deck">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inline import panel (shared, repositions under the clicked slot) -->
+        <div id="play-import-panel" class="play-import-panel hidden">
+          <div class="play-import-tabs">
+            <button class="play-import-tab active" data-mode="moxfield">🔗 Moxfield URL</button>
+            <button class="play-import-tab" data-mode="text">📋 Coller une liste</button>
+          </div>
+          <div class="play-import-body">
+            <input id="play-import-name" class="play-import-input" type="text" placeholder="Nom du deck (requis pour liste, auto Moxfield)">
+            <div id="play-import-moxfield-wrap">
+              <input id="play-import-url" class="play-import-input" type="text" placeholder="https://moxfield.com/decks/…">
+            </div>
+            <div id="play-import-text-wrap" class="hidden">
+              <textarea id="play-import-text" class="play-import-textarea" placeholder="1 Lightning Bolt&#10;4 Llanowar Elves&#10;...&#10;&#10;// Commander (section séparée)&#10;1 Slimefoot and Squee"></textarea>
+            </div>
+            <div class="play-import-footer">
+              <span id="play-import-status" class="play-import-status"></span>
+              <button id="btn-play-import-ok" class="btn-primary btn-sm">Importer</button>
+              <button id="btn-play-import-cancel" class="btn-secondary btn-sm">Annuler</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="format-row">
+          <label>Format</label>
+          <select id="play-format" class="format-select">
+            <option value="Commander">Commander</option>
+            <option value="Constructed">Constructed</option>
+          </select>
+        </div>
+        <div class="debug-toggle-row">
+          <label class="debug-toggle-label">
+            <input type="checkbox" id="play-debug-mode">
+            🔧 Mode debug (mana infini, adversaire passif)
+          </label>
+        </div>
+        <button id="btn-play-start" class="btn-primary">▶ Start Game</button>
+        <div id="play-error" class="modal-error hidden"></div>
+      </div>
+
+      <!-- Game board (shown during game) -->
+      <div id="play-board" class="play-board hidden">
+        <!-- SVG overlay for target arrows -->
+        <svg id="target-arrows" style="position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:250;overflow:visible">
+          <defs>
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0,8 3,0 6" fill="rgba(80,160,255,0.9)"/>
+            </marker>
+            <marker id="arrowhead-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0,8 3,0 6" fill="rgba(255,100,80,0.9)"/>
+            </marker>
+          </defs>
+        </svg>
+
+        <!-- Center board -->
+        <div class="play-board-main">
+          <div class="play-board-center">
+
+            <!-- Opponent row — lands top, creatures bottom -->
+            <div class="play-player-row play-opponent">
+
+              <!-- Zone mixte LEFT (cmd area top, stats bottom) -->
+              <div class="zone-mixte">
+                <div class="zone-cmd-area">
+                  <div id="opp-commander" class="cmd-slot-zone"></div>
+                </div>
+                <div class="zone-stats-row">
+                  <div class="zone-stat-cell zone-lib">
+                    <div class="zone-lib-back"></div>
+                    <span class="zone-stat-label">Bibliothèque</span>
+                    <span id="opp-library" class="zone-stat-count">0</span>
+                  </div>
+                  <div id="opp-gy-pile" class="zone-stat-cell zone-gy empty" title="Cimetière">
+                    <span class="zone-stat-icon">🪦</span>
+                    <img id="opp-gy-img" class="zone-stat-img hidden" alt="GY">
+                    <span class="zone-stat-label">Cimetière</span>
+                    <span id="opp-gy-count" class="zone-stat-count">0</span>
+                  </div>
+                  <div id="opp-exile-pile" class="zone-stat-cell zone-exile empty" title="Exil">
+                    <span class="zone-stat-icon">🕳</span>
+                    <img id="opp-exile-img" class="zone-stat-img hidden" alt="EX">
+                    <span class="zone-stat-label">Exil</span>
+                    <span id="opp-exile-count" class="zone-stat-count">0</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right: info + battlefield -->
+              <div class="play-right">
+                <div class="play-player-info">
+                  <span id="opp-name" class="play-player-name"></span>
+                  <span id="opp-life" class="play-life"></span>
+                  <span id="opp-hand" class="play-stat"></span>
+                  <div id="opp-mana-pool" class="mana-pool-inline"></div>
+                </div>
+                <div class="play-player-main">
+                  <div class="play-bf-layout">
+                    <div class="play-bf-main">
+                      <div id="opp-bf-lands" class="bf-zone bf-zone-row"></div>
+                      <div id="opp-bf-creatures" class="bf-zone bf-zone-row"></div>
+                    </div>
+                    <div class="play-bf-side">
+                      <div id="opp-bf-side" class="bf-zone bf-zone-other"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Phase timeline -->
+            <div class="play-phase-timeline">
+              <span id="play-active-badge" class="play-active-badge"></span>
+              <span class="phase-node" data-phases="UNTAP">Untap</span>
+              <span class="phase-node" data-phases="UPKEEP">Upkeep</span>
+              <span class="phase-node" data-phases="DRAW">Draw</span>
+              <span class="phase-node" data-phases="MAIN1">Main 1</span>
+              <span class="phase-sep">⚔</span>
+              <span class="phase-node phase-combat" data-phases="COMBAT_BEGIN">Début</span>
+              <span class="phase-node phase-combat" data-phases="COMBAT_DECLARE_ATTACKERS">Attaquants</span>
+              <span class="phase-node phase-combat" data-phases="COMBAT_DECLARE_BLOCKERS">Bloqueurs</span>
+              <span class="phase-node phase-combat" data-phases="COMBAT_FIRST_STRIKE_DAMAGE">Initiative</span>
+              <span class="phase-node phase-combat" data-phases="COMBAT_DAMAGE">Dégâts</span>
+              <span class="phase-node phase-combat" data-phases="COMBAT_END">Fin combat</span>
+              <span class="phase-sep">·</span>
+              <span class="phase-node" data-phases="MAIN2">Main 2</span>
+              <span class="phase-node" data-phases="ENDOFTURN CLEANUP">End</span>
+              <span class="phase-tl-turn" id="play-turn"></span>
+              <span class="phase-tl-priority" id="play-priority"></span>
+            </div>
+
+
+            <!-- Self row — creatures top, lands bottom -->
+            <div class="play-player-row play-self">
+
+              <!-- Zone mixte LEFT (stats near center, cmd near hand) -->
+              <div class="zone-mixte">
+                <div class="zone-stats-row">
+                  <div class="zone-stat-cell zone-lib">
+                    <div class="zone-lib-back"></div>
+                    <span class="zone-stat-label">Bibliothèque</span>
+                    <span id="self-library" class="zone-stat-count">0</span>
+                  </div>
+                  <div id="self-gy-pile" class="zone-stat-cell zone-gy empty" title="Cimetière">
+                    <span class="zone-stat-icon">🪦</span>
+                    <img id="self-gy-img" class="zone-stat-img hidden" alt="GY">
+                    <span class="zone-stat-label">Cimetière</span>
+                    <span id="self-gy-count" class="zone-stat-count">0</span>
+                  </div>
+                  <div id="self-exile-pile" class="zone-stat-cell zone-exile empty" title="Exil">
+                    <span class="zone-stat-icon">🕳</span>
+                    <img id="self-exile-img" class="zone-stat-img hidden" alt="EX">
+                    <span class="zone-stat-label">Exil</span>
+                    <span id="self-exile-count" class="zone-stat-count">0</span>
+                  </div>
+                </div>
+                <div class="zone-cmd-area">
+                  <div id="self-commander" class="cmd-slot-zone"></div>
+                </div>
+              </div>
+
+              <!-- Right: battlefield + info + hand -->
+              <div class="play-right">
+                <div class="play-player-main">
+                  <div class="play-bf-layout">
+                    <div class="play-bf-main">
+                      <div id="self-bf-creatures" class="bf-zone bf-zone-row"></div>
+                      <div id="self-bf-lands" class="bf-zone bf-zone-row bf-zone-lands"></div>
+                    </div>
+                    <div class="play-bf-side">
+                      <div id="self-bf-other" class="bf-zone bf-zone-other"></div>
+                    </div>
+                  </div>
+                </div>
+                <div id="self-hand-zone" class="play-hand-zone"></div>
+                <div class="play-player-info">
+                  <span id="self-name" class="play-player-name"></span>
+                  <span id="self-life" class="play-life"></span>
+                  <span id="self-hand" class="play-stat"></span>
+                  <div id="self-mana-pool" class="mana-pool-inline"></div>
+                </div>
+              </div>
+
+            </div>
+
+          </div><!-- end play-board-center -->
+        </div><!-- end play-board-main -->
+
+        <!-- Decision bar -->
+        <div id="play-decision" class="play-decision-bar hidden">
+          <button id="btn-pass-priority" class="btn-pass-big hidden">OK ▶</button>
+          <div class="decision-bar-mid">
+            <div id="decision-type" class="decision-type-label"></div>
+            <div id="decision-buttons" class="decision-buttons"></div>
+          </div>
+          <button id="auto-pass-eot-btn" class="auto-pass-eot-btn" title="Passer automatiquement toutes les priorités jusqu'à la fin du tour adverse">⏩ Auto-pass EOT</button>
+        </div>
+
+        <!-- Debug bar (visible only in debug mode) -->
+        <div id="debug-bar" class="debug-bar hidden">
+          <span class="debug-bar-label">🔧 Debug</span>
+          <button id="debug-add-hand" class="debug-btn" title="Ajouter une carte en main">+ Main</button>
+          <button id="debug-add-bf" class="debug-btn" title="Ajouter une carte sur le champ de bataille">+ Champ</button>
+          <button id="debug-add-opp-bf" class="debug-btn" title="Ajouter une carte sur le champ de bataille de l'adversaire">+ Champ Adv</button>
+          <button id="debug-set-life" class="debug-btn debug-btn-life" title="Modifier ses points de vie">❤️ PV</button>
+        </div>
+
+        <!-- Zone-change picker modal (fetch, tutor, etc.) -->
+        <div id="zone-pick-modal" class="zone-pick-modal hidden">
+          <div class="zone-pick-inner">
+            <div class="zone-pick-header">
+              <span id="zone-pick-title" class="zone-pick-title"></span>
+              <input id="zone-pick-search" class="zone-pick-search" type="text" placeholder="Rechercher...">
+            </div>
+            <div id="zone-pick-grid" class="zone-pick-grid"></div>
+          </div>
+        </div>
+
+        <!-- Activated ability popup (contextual menu near card) -->
+        <div id="ability-popup" class="ability-popup hidden">
+          <div id="ability-popup-btns" class="ability-popup-btns"></div>
+        </div>
+
+        <!-- Zone viewer modal (graveyard / exile) -->
+        <div id="zone-viewer-modal" class="zone-pick-modal hidden">
+          <div class="zone-pick-inner zone-viewer-inner">
+            <div class="zone-pick-header">
+              <span id="zone-viewer-title" class="zone-pick-title"></span>
+              <button id="zone-viewer-close" class="btn-secondary">✕</button>
+            </div>
+            <div id="zone-viewer-grid" class="zone-pick-grid zone-viewer-grid"></div>
+          </div>
+        </div>
+
+
+        <div class="play-board-footer">
+          <button id="btn-play-stop" class="btn-secondary">✕ Abandon Game</button>
+          <span id="match-score" class="match-score-badge"></span>
+          <span id="play-winner" class="play-winner-badge hidden"></span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ── BUILDER VIEW ──────────────────────────────── -->
+    <section class="view" id="view-builder">
+      <div class="builder-layout">
+
+        <!-- Left: card search -->
+        <div class="builder-search-panel">
+          <div class="builder-search-bar">
+            <input id="builder-search-input" type="text" class="builder-search-input" placeholder="Chercher une carte…">
+            <button id="builder-search-btn" class="builder-search-btn">🔍</button>
+          </div>
+          <div id="builder-search-results" class="builder-search-results"></div>
+        </div>
+
+        <!-- Center: deck editor -->
+        <div class="builder-deck-panel">
+          <div class="builder-deck-toolbar">
+            <input id="builder-deck-name" type="text" class="builder-deck-name-input" placeholder="Nom du deck…">
+            <select id="builder-deck-format" class="builder-format-select">
+              <option value="Commander">Commander</option>
+              <option value="Constructed">Constructed</option>
+            </select>
+            <button id="builder-new-btn" class="btn-secondary btn-sm">+ Nouveau</button>
+            <button id="builder-save-btn" class="btn-primary btn-sm">💾 Sauvegarder</button>
+          </div>
+          <div class="builder-view-toolbar">
+            <div class="builder-view-toggle">
+              <button class="builder-view-btn" data-mode="list" title="Vue liste">≡ Liste</button>
+              <button class="builder-view-btn" data-mode="visual" title="Vue visuelle">⊞ Visual</button>
+            </div>
+            <div class="builder-sort-bar">
+              <span class="builder-sort-label">Grouper</span>
+              <select id="builder-group-by" class="builder-sort-select">
+                <option value="type">Type</option>
+                <option value="none">Aucun</option>
+              </select>
+              <span class="builder-sort-label">Trier</span>
+              <select id="builder-sort-by" class="builder-sort-select">
+                <option value="cmc">CMC</option>
+                <option value="name">Nom</option>
+              </select>
+            </div>
+          </div>
+          <div id="builder-status" class="builder-status"></div>
+          <div id="builder-deck-content" class="builder-deck-content"></div>
+        </div>
+
+        <!-- Right: saved decks -->
+        <div class="builder-decks-panel">
+          <div class="builder-decks-toolbar">
+            <span class="builder-decks-title">Mes Decks</span>
+            <select id="builder-list-format" class="builder-format-select">
+              <option value="Commander">Commander</option>
+              <option value="Constructed">Constructed</option>
+            </select>
+          </div>
+          <div id="builder-decks-list" class="builder-decks-list"></div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Stack floating window -->
+  <!-- Floating confirm dialog -->
+  <div id="confirm-panel" class="confirm-panel hidden">
+    <div class="confirm-panel-header" id="confirm-drag-handle">
+      <span class="confirm-panel-title">❓ Confirmation</span>
+    </div>
+    <div class="confirm-panel-body">
+      <p id="confirm-panel-text"></p>
+      <div id="confirm-panel-card-wrap"></div>
+      <div class="confirm-panel-btns">
+        <button id="confirm-btn-yes" class="confirm-btn confirm-btn-yes">✔ Oui</button>
+        <button id="confirm-btn-no" class="confirm-btn confirm-btn-no">✕ Non</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mulligan tuck panel -->
+  <div id="mulligan-tuck-panel" class="mulligan-tuck-panel hidden">
+    <div class="mulligan-tuck-header" id="mulligan-tuck-drag">
+      <span class="mulligan-tuck-title">↩ Choisir les cartes à mettre en dessous</span>
+    </div>
+    <div id="mulligan-tuck-body" class="mulligan-tuck-body"></div>
+    <div class="mulligan-tuck-footer">
+      <span id="mulligan-tuck-hint" class="mulligan-tuck-hint"></span>
+      <button id="mulligan-tuck-confirm" class="confirm-btn confirm-btn-yes" disabled>✔ Confirmer</button>
+    </div>
+  </div>
+
+  <div id="play-stack-panel" class="play-stack-panel hidden">
+    <div class="stack-panel-header">
+      <span class="stack-panel-title">The Stack <span id="stack-count"></span></span>
+    </div>
+    <div id="play-stack" class="play-stack-list"></div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "forge-electron",
+  "version": "0.1.0",
+  "description": "MTG Forge - Modern Interface",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0",
+  "devDependencies": {
+    "electron": "^33.4.0"
+  }
+}

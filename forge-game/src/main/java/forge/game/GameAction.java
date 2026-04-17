@@ -2441,7 +2441,15 @@ public class GameAction {
                 p.getController().awaitNextInput(); //show "Waiting for opponent..." while first player chooses whether to go first or keep their hand
             }
         }
+        Player tossWinner = goesFirst;
         goesFirst = goesFirst.getController().chooseStartingPlayer(isFirstGame);
+        // Notify non-toss-winner players of the result (e.g. human when AI wins the toss)
+        final Player firstPlayer = goesFirst;
+        for (Player p : game.getPlayers()) {
+            if (p != tossWinner) {
+                p.getController().notifyTossResult(tossWinner.getName(), firstPlayer.getName(), isFirstGame);
+            }
+        }
         return goesFirst;
     }
 

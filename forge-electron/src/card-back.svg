@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 63 88" width="63" height="88">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#1a0a00"/>
+      <stop offset="100%" stop-color="#0a0500"/>
+    </radialGradient>
+    <radialGradient id="oval" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7a3010"/>
+      <stop offset="60%" stop-color="#5a1e08"/>
+      <stop offset="100%" stop-color="#3a0e02"/>
+    </radialGradient>
+    <linearGradient id="shine" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c87840" stop-opacity="0.4"/>
+      <stop offset="50%" stop-color="#804020" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#c87840" stop-opacity="0.3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card border -->
+  <rect x="0" y="0" width="63" height="88" rx="4" ry="4" fill="#2a1005"/>
+
+  <!-- Card face background -->
+  <rect x="2" y="2" width="59" height="84" rx="3" ry="3" fill="url(#bg)"/>
+
+  <!-- Outer oval frame -->
+  <ellipse cx="31.5" cy="44" rx="26" ry="36" fill="none" stroke="#8b4513" stroke-width="2.5"/>
+  <ellipse cx="31.5" cy="44" rx="23" ry="33" fill="none" stroke="#a0522d" stroke-width="1"/>
+
+  <!-- Inner oval fill -->
+  <ellipse cx="31.5" cy="44" rx="22" ry="32" fill="url(#oval)"/>
+  <ellipse cx="31.5" cy="44" rx="22" ry="32" fill="url(#shine)"/>
+
+  <!-- MTG logo area - simplified pentagon/shield shape -->
+  <polygon points="31.5,18 42,26 38,38 25,38 21,26" fill="#c8960c" opacity="0.85"/>
+  <polygon points="31.5,20 40,27 36.5,37 26.5,37 23,27" fill="#1a0a00" opacity="0.7"/>
+
+  <!-- Decorative lines -->
+  <line x1="31.5" y1="40" x2="31.5" y2="68" stroke="#8b4513" stroke-width="0.5" opacity="0.6"/>
+  <line x1="18" y1="54" x2="45" y2="54" stroke="#8b4513" stroke-width="0.5" opacity="0.6"/>
+
+  <!-- Corner ornaments -->
+  <circle cx="14" cy="20" r="2" fill="#8b4513" opacity="0.6"/>
+  <circle cx="49" cy="20" r="2" fill="#8b4513" opacity="0.6"/>
+  <circle cx="14" cy="68" r="2" fill="#8b4513" opacity="0.6"/>
+  <circle cx="49" cy="68" r="2" fill="#8b4513" opacity="0.6"/>
+</svg>

@@ -214,6 +214,8 @@ public abstract class PlayerController {
     public abstract CardCollectionView chooseCardsToRevealFromHand(int min, int max, CardCollectionView valid);
     public abstract List<SpellAbility> chooseSaToActivateFromOpeningHand(List<SpellAbility> usableFromOpeningHand);
     public abstract Player chooseStartingPlayer(boolean isFirstGame);
+    /** Called on players who did NOT win the toss, after the winner has chosen who goes first. Default no-op. */
+    public void notifyTossResult(String tossWinnerName, String firstPlayerName, boolean isFirstGame) {}
     public abstract PlayerZone chooseStartingHand(List<PlayerZone> zones);
     public abstract Mana chooseManaFromPool(List<Mana> manaChoices);
 
