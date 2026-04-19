@@ -11,117 +11,7 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-// ── Format ↔ decks sync ───────────────────────────────────────────────────
-const formatSelect = document.getElementById('format');
-formatSelect.addEventListener('change', () => loadDecks(formatSelect.value));
 
-// ── Deck loader ───────────────────────────────────────────────────────────
-async function loadDecks(format = 'Constructed') {
-  const selects = [document.getElementById('deck1'), document.getElementById('deck2')];
-  selects.forEach(s => { s.innerHTML = '<option value="">Loading…</option>'; s.disabled = true; });
-
-  try {
-    const decks = await window.forgeApi.get('/api/decks?format=' + format.toLowerCase());
-    selects.forEach(s => {
-      s.innerHTML = decks.length
-        ? decks.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('')
-        : '<option value="">No decks found</option>';
-      s.disabled = decks.length === 0;
-    });
-    // Default: pick different decks if possible
-    if (decks.length >= 2) document.getElementById('deck2').selectedIndex = 1;
-  } catch (err) {
-    selects.forEach(s => {
-      s.innerHTML = '<option value="">Error loading decks</option>';
-      s.disabled = true;
-    });
-    console.error('Failed to load decks:', err);
-  }
-}
-
-// ── Simulate ──────────────────────────────────────────────────────────────
-const btnSimulate  = document.getElementById('btn-simulate');
-const resultPanel  = document.getElementById('result-panel');
-const resultWinner = document.getElementById('result-winner');
-const resultMeta   = document.getElementById('result-meta');
-const gameLog      = document.getElementById('game-log');
-const btnCopy      = document.getElementById('btn-copy-log');
-
-btnSimulate.addEventListener('click', runSimulation);
-
-async function runSimulation() {
-  const deck1   = document.getElementById('deck1').value;
-  const deck2   = document.getElementById('deck2').value;
-  const format  = formatSelect.value;
-  const timeout = parseInt(document.getElementById('timeout').value, 10) || 120;
-
-  if (!deck1 || !deck2) return;
-
-  btnSimulate.disabled = true;
-  btnSimulate.textContent = '⏳ Simulating…';
-  resultPanel.classList.add('hidden');
-
-  try {
-    const result = await window.forgeApi.post('/api/simulate', { deck1, deck2, format,
-      timeoutSeconds: timeout });
-
-    showResult(result);
-  } catch (err) {
-    showError('Simulation failed: ' + err.message);
-  } finally {
-    btnSimulate.disabled = false;
-    btnSimulate.textContent = '▶ Run Simulation';
-  }
-}
-
-function showResult(result) {
-  // Winner badge
-  if (result.isDraw) {
-    resultWinner.textContent = '½  Draw';
-    resultWinner.className = 'winner-badge draw';
-  } else {
-    resultWinner.textContent = '🏆  ' + (result.winner || 'Unknown');
-    resultWinner.className = 'winner-badge';
-  }
-
-  resultMeta.textContent = `${(result.durationMs / 1000).toFixed(1)}s  ·  ${result.log.length} log entries`;
-
-  // Render log with colour coding
-  gameLog.innerHTML = result.log.map(line => {
-    const cls = classifyLine(line);
-    return `<div class="log-line ${cls}">${esc(line)}</div>`;
-  }).join('');
-
-  resultPanel.classList.remove('hidden');
-  gameLog.parentElement.scrollTop = 0;
-}
-
-function showError(msg) {
-  resultWinner.textContent = '⚠  ' + msg;
-  resultWinner.className = 'winner-badge draw';
-  resultMeta.textContent = '';
-  gameLog.innerHTML = '';
-  resultPanel.classList.remove('hidden');
-}
-
-function classifyLine(line) {
-  if (/^Turn:/i.test(line))                          return 'turn';
-  if (/^Phase:/i.test(line))                         return 'phase';
-  if (/mulligan/i.test(line))                        return 'mulligan';
-  if (/combat damage|deals.*damage/i.test(line))     return 'damage';
-  if (/combat/i.test(line))                          return 'combat';
-  if (/game result|has won|ended in/i.test(line))    return 'result';
-  return '';
-}
-
-// ── Copy log ──────────────────────────────────────────────────────────────
-btnCopy.addEventListener('click', () => {
-  const lines = [...gameLog.querySelectorAll('.log-line')].map(el => el.textContent);
-  navigator.clipboard.writeText(lines.join('\n')).then(() => {
-    btnCopy.textContent = 'Copied!';
-    setTimeout(() => { btnCopy.textContent = 'Copy Log'; }, 1500);
-  });
-});
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function esc(str) {
@@ -469,47 +359,75 @@ function renderDeckGrid() {
   const commanders = currentDeckCards.filter(c => c.section === 'Commander');
   const main       = currentDeckCards.filter(c => c.section !== 'Commander');
 
-  const groups = new Map();
-  for (const card of main) {
-    const sf = scryfallCards.get(card.name);
-    let key;
-    if (deckGroupBy === 'cmc') {
-      const cmc = sf?.cmc ?? 0;
-      key = cmc >= 6 ? '6+' : String(Math.floor(cmc));
-    } else if (deckGroupBy === 'color') {
-      const colors = sf?.colors ?? [];
-      key = colors.length === 0 ? 'Colorless' : colors.length > 1 ? 'Multicolor' : colors[0];
-    } else {
-      key = getMainType(sf);
-    }
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(card);
-  }
-
-  const typeOrder = ['Land','Creature','Planeswalker','Battle','Instant','Sorcery','Enchantment','Artifact','Other'];
+  const typeOrder  = ['Land','Creature','Planeswalker','Battle','Instant','Sorcery','Enchantment','Artifact','Other'];
   const colorOrder = ['W','U','B','R','G','Multicolor','Colorless'];
-  const sortedKeys = deckGroupBy === 'cmc'
-    ? ['0','1','2','3','4','5','6+'].filter(k => groups.has(k))
-    : deckGroupBy === 'color'
-      ? colorOrder.filter(k => groups.has(k))
-      : typeOrder.filter(k => groups.has(k));
-  // append any unexpected keys
-  for (const k of groups.keys()) if (!sortedKeys.includes(k)) sortedKeys.push(k);
+  const cmcOrder   = ['0','1','2','3','4','5','6+'];
+
+  const getCmc  = sf => { const v = sf?.cmc ?? 0; return v >= 6 ? '6+' : String(Math.floor(v)); };
+  const getColor = sf => { const c = sf?.colors ?? []; return c.length === 0 ? 'Colorless' : c.length > 1 ? 'Multicolor' : c[0]; };
 
   let html = '';
+
   if (commanders.length) {
     const count = commanders.reduce((s, c) => s + c.qty, 0);
     html += `<div class="card-group"><h3 class="group-header">Commander <span class="group-count">(${count})</span></h3><div class="card-row">`;
     for (const c of commanders) html += cardTile(c);
     html += '</div></div>';
   }
-  for (const key of sortedKeys) {
-    const cards = groups.get(key);
-    const label = deckGroupBy === 'cmc' ? `CMC ${key}` : key;
-    const total = cards.reduce((s, c) => s + c.qty, 0);
-    html += `<div class="card-group"><h3 class="group-header">${esc(label)} <span class="group-count">(${total})</span></h3><div class="card-row">`;
-    for (const c of cards) html += cardTile(c);
-    html += '</div></div>';
+
+  if (deckGroupBy === 'type+cmc') {
+    // Nested: group by type, sub-group by CMC
+    const typeGroups = new Map();
+    for (const card of main) {
+      const sf = scryfallCards.get(card.name);
+      const typeKey = getMainType(sf);
+      const cmcKey  = getCmc(sf);
+      if (!typeGroups.has(typeKey)) typeGroups.set(typeKey, new Map());
+      const cmcMap = typeGroups.get(typeKey);
+      if (!cmcMap.has(cmcKey)) cmcMap.set(cmcKey, []);
+      cmcMap.get(cmcKey).push(card);
+    }
+    const sortedTypes = typeOrder.filter(k => typeGroups.has(k));
+    for (const k of typeGroups.keys()) if (!sortedTypes.includes(k)) sortedTypes.push(k);
+
+    for (const typeKey of sortedTypes) {
+      const cmcMap = typeGroups.get(typeKey);
+      const typeTotal = [...cmcMap.values()].flat().reduce((s, c) => s + c.qty, 0);
+      html += `<div class="card-group card-group-nested"><h3 class="group-header">${esc(typeKey)} <span class="group-count">(${typeTotal})</span></h3>`;
+      const sortedCmc = cmcOrder.filter(k => cmcMap.has(k));
+      for (const k of cmcMap.keys()) if (!sortedCmc.includes(k)) sortedCmc.push(k);
+      for (const cmcKey of sortedCmc) {
+        const cards = cmcMap.get(cmcKey);
+        const subTotal = cards.reduce((s, c) => s + c.qty, 0);
+        html += `<div class="card-subgroup"><span class="subgroup-label">CMC ${esc(cmcKey)} <span class="group-count">(${subTotal})</span></span><div class="card-row">`;
+        for (const c of cards) html += cardTile(c);
+        html += '</div></div>';
+      }
+      html += '</div>';
+    }
+  } else {
+    const groups = new Map();
+    for (const card of main) {
+      const sf = scryfallCards.get(card.name);
+      let key;
+      if (deckGroupBy === 'cmc')   key = getCmc(sf);
+      else if (deckGroupBy === 'color') key = getColor(sf);
+      else key = getMainType(sf);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(card);
+    }
+    const sortedKeys = (deckGroupBy === 'cmc' ? cmcOrder : deckGroupBy === 'color' ? colorOrder : typeOrder)
+      .filter(k => groups.has(k));
+    for (const k of groups.keys()) if (!sortedKeys.includes(k)) sortedKeys.push(k);
+
+    for (const key of sortedKeys) {
+      const cards = groups.get(key);
+      const label = deckGroupBy === 'cmc' ? `CMC ${key}` : key;
+      const total = cards.reduce((s, c) => s + c.qty, 0);
+      html += `<div class="card-group"><h3 class="group-header">${esc(label)} <span class="group-count">(${total})</span></h3><div class="card-row">`;
+      for (const c of cards) html += cardTile(c);
+      html += '</div></div>';
+    }
   }
   deckGrid.innerHTML = html;
 }
@@ -674,6 +592,7 @@ let selectedHandCards = []; // for future multi-select (currently single)
 
 document.getElementById('btn-play-start').addEventListener('click', startPlayGame);
 document.getElementById('btn-play-stop').addEventListener('click', stopPlayGame);
+document.getElementById('btn-concede').addEventListener('click', concedeGame);
 document.getElementById('btn-pass-priority').addEventListener('click', () => sendDecision({ choice: 'pass' }));
 
 // ── Auto-pass EOT toggle ───────────────────────────────────────────────────
@@ -920,15 +839,28 @@ function startPolling() {
       }
     }
   } catch { /* ignore */ }
-  playPollTimer = setInterval(async () => {
-    if (!playSession) { clearInterval(playPollTimer); return; }
-    if (pausePolling) return;
-    try {
-      const state = await window.forgeApi.get('/api/game/' + playSession + '/state');
-      renderGameState(state);
-      if (state.gameOver) clearInterval(playPollTimer);
-    } catch (e) { /* keep polling */ }
-  }, 600);
+  playPollTimer = setInterval(doPoll, 600);
+}
+
+async function doPoll() {
+  if (!playSession) { clearInterval(playPollTimer); return; }
+  if (pausePolling) return;
+  const sessionIdAtPoll = playSession;
+  try {
+    const state = await window.forgeApi.get('/api/game/' + sessionIdAtPoll + '/state');
+    if (playSession !== sessionIdAtPoll) return; // stale — discard
+    renderGameState(state);
+    if (state.gameOver) clearInterval(playPollTimer);
+  } catch (e) { /* keep polling */ }
+}
+
+async function concedeGame() {
+  if (!playSession) return;
+  try {
+    await window.forgeApi.post('/api/game/' + playSession + '/concede', {});
+  } catch { /* ignore */ }
+  // Force an immediate poll so gameOver is detected without waiting for the timer
+  setTimeout(doPoll, 200);
 }
 
 async function stopPlayGame() {
@@ -947,7 +879,7 @@ function resetPlayView() {
   document.getElementById('play-board').classList.add('hidden');
   document.getElementById('play-winner').classList.add('hidden');
   document.getElementById('play-decision').classList.add('hidden');
-  document.getElementById('play-log').textContent = '';
+  { const el = document.getElementById('play-log'); if (el) el.textContent = ''; }
   document.getElementById('debug-bar')?.classList.add('hidden');
   const ms = document.getElementById('match-score');
   if (ms) ms.textContent = '';
@@ -982,6 +914,7 @@ function handleGameOver(winner) {
 
   // Next game
   matchState.game++;
+  matchState.lastWinner = winner || null; // save for goFirstPlayerIndex in startNextGame
   const gameWinnerText = winner === 'DRAW' ? 'Égalité' : (winner ? winner + ' gagne' : 'Partie terminée');
   winnerEl.innerHTML = `Game ${matchState.game - 1} — ${gameWinnerText} (${p1w}–${p2w})
     <button id="btn-next-game" class="btn-primary" style="margin-left:12px">▶ Game ${matchState.game}</button>
@@ -992,58 +925,62 @@ function handleGameOver(winner) {
 
 async function startNextGame() {
   const winnerEl = document.getElementById('play-winner');
-  const savedPlayState = playState;
 
-  // 1. Immediately stop polling and freeze UI so nothing overwrites our status messages
+  // Stop polling. Set playSession=null immediately so any in-flight polls discard their results.
   clearInterval(playPollTimer);
+  gameOverHandled = true;
+  const oldSession = playSession;
+  playSession = null;
   pausePolling = false;
 
-  winnerEl.innerHTML = '⏳ Arrêt de la session précédente…';
-
-  // Clean up old board state
+  // Reset UI
+  winnerEl.innerHTML = '⏳ Démarrage game ' + matchState.game + '…';
   document.querySelectorAll('#coin-modal,#arrange-modal').forEach(m => m.remove());
   playState = null;
-  document.getElementById('play-log').textContent = '';
+  { const el = document.getElementById('play-log'); if (el) el.textContent = ''; }
   document.getElementById('play-decision').classList.add('hidden');
 
-  // 2. Terminate the old session FIRST so its game thread is freed before any new calls
-  if (playSession) {
+  // Step 1: delete old session — await with 3s max so the server finishes before POST
+  winnerEl.textContent = '⏳ Étape 1/3 — Suppression ancienne session…';
+  if (oldSession) {
     try {
-      // 8-second fallback in the renderer in case main.js timeout isn't loaded yet
       await Promise.race([
-        window.forgeApi.delete('/api/game/' + playSession),
-        new Promise(r => setTimeout(r, 8000))
+        window.forgeApi.delete('/api/game/' + oldSession),
+        new Promise(r => setTimeout(r, 3000))
       ]);
     } catch { /* ignore */ }
-    playSession = null;
   }
 
-  // 3. Commander swap: now that the old thread is dead, fetch commanders safely
-  let selectedCommander1 = null;
+  // Step 2: optional commander swap (skip if takes > 10s)
+  winnerEl.textContent = '⏳ Étape 2/3 — Chargement commandants…';
+  let selectedCommanders = null; // array of 1 or 2 names
   try {
-    const currentCmd = savedPlayState?.players?.[0]?.command?.[0]?.name || null;
-    winnerEl.innerHTML = '⏳ Choix du commandant…';
-    const cmdrData = await window.forgeApi.get(
-      '/api/game/commanders?deck=' + encodeURIComponent(matchState.deck1));
+    const cmdrData = await Promise.race([
+      window.forgeApi.get('/api/game/commanders?deck=' + encodeURIComponent(matchState.deck1)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('commanders timeout')), 10000))
+    ]);
     if (cmdrData.commanders && cmdrData.commanders.length > 1) {
-      selectedCommander1 = await new Promise(resolve =>
-        showCommanderSwapModal(cmdrData.commanders, currentCmd, resolve));
+      selectedCommanders = await new Promise(resolve =>
+        showCommanderSwapModal(cmdrData.commanders, cmdrData.designatedCount || 1, resolve));
     }
-  } catch (e) {
-    console.warn('[startNextGame] commander fetch/swap skipped:', e);
-    /* ignore — continue without swap */
-  }
+  } catch { /* ignore */ }
+  // Pre-fetch images for selected commanders so command zone shows immediately
+  if (selectedCommanders) selectedCommanders.filter(Boolean).forEach(n => fetchCardImage(n));
 
-  winnerEl.innerHTML = '⏳ Démarrage game ' + matchState.game + '…';
-
-  // 4. Start the new game
+  // Step 3: start new game
+  winnerEl.textContent = '⏳ Étape 3/3 — Démarrage game ' + matchState.game + '…';
   try {
     const body = { deck1: matchState.deck1, deck2: matchState.deck2, format: matchState.format };
-    if (selectedCommander1) body.commander1 = selectedCommander1;
+    if (selectedCommanders && selectedCommanders[0]) body.commander1 = selectedCommanders[0];
+    if (selectedCommanders && selectedCommanders[1]) body.commander2 = selectedCommanders[1];
+    // Loser of last game goes first (winner != null: other player is loser; null = concede = player 1 lost)
+    const lastWinner = matchState.lastWinner;
+    body.goFirstPlayerIndex = (!lastWinner || lastWinner === 'AI') ? 0 : 1;
     if (matchState.debug) body.debug = true;
-    console.log('[startNextGame] POST /api/game/start', body);
-    const result = await window.forgeApi.post('/api/game/start', body);
-    console.log('[startNextGame] result:', result);
+    const result = await Promise.race([
+      window.forgeApi.post('/api/game/start', body),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('POST /api/game/start timeout 12s')), 12000))
+    ]);
     if (result.error) throw new Error(result.error);
     playSession = result.sessionId;
     const debugBar = document.getElementById('debug-bar');
@@ -1053,66 +990,110 @@ async function startNextGame() {
     updateMatchScore();
     startPolling();
   } catch (e) {
-    console.error('[startNextGame] error:', e);
-    winnerEl.textContent = 'Erreur démarrage game ' + matchState.game + ' : ' + (e.message || e);
+    winnerEl.textContent = 'Erreur game ' + matchState.game + ' : ' + (e.message || e);
   }
 }
 
-function showCommanderSwapModal(commanders, currentName, onSelect) {
+// onSelect receives an array of selected commander names (1 or 2)
+function showCommanderSwapModal(commanders, designatedCount, onSelect) {
+  const isPartner = designatedCount >= 2;
+  const maxSelect = isPartner ? 2 : 1;
+  const selected = new Set();
+
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;align-items:center;justify-content:center;z-index:9500';
 
   const box = document.createElement('div');
-  box.style.cssText = 'background:var(--bg-elevated);border:1px solid var(--gold,#c8a96e);border-radius:10px;padding:20px;max-width:680px;width:90%;max-height:80vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px';
+  box.style.cssText = 'background:var(--bg-elevated);border:1px solid var(--gold,#c8a96e);border-radius:10px;padding:20px;max-width:720px;width:90%;max-height:80vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px';
 
   const title = document.createElement('div');
-  title.textContent = '⚔ Changer de commandant pour cette game ?';
+  title.textContent = isPartner
+    ? '⚔ Choisir 2 commandants partenaires pour cette game'
+    : '⚔ Changer de commandant pour cette game ?';
   title.style.cssText = 'font-size:1rem;font-weight:700;color:var(--gold,#c8a96e);text-align:center';
   box.appendChild(title);
 
+  const hint = document.createElement('div');
+  hint.style.cssText = 'font-size:0.75rem;color:var(--text-secondary);text-align:center';
+  hint.textContent = isPartner ? 'Sélectionnez exactement 2 commandants' : 'Cliquez pour choisir';
+  box.appendChild(hint);
+
   const grid = document.createElement('div');
   grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn-primary';
+  confirmBtn.style.cssText = 'align-self:center;margin-top:4px';
+  const updateConfirm = () => {
+    if (isPartner) {
+      confirmBtn.disabled = selected.size !== 2;
+      confirmBtn.textContent = selected.size === 2 ? 'Jouer avec ces commandants' : `Sélectionnez ${2 - selected.size} de plus`;
+    } else {
+      confirmBtn.disabled = selected.size === 0;
+      confirmBtn.textContent = 'Jouer avec ce commandant';
+    }
+  };
+  updateConfirm();
+
+  const resolve = (names) => {
+    modal.remove();
+    document.removeEventListener('keydown', onKey);
+    onSelect(names);
+  };
 
   for (const cmd of commanders) {
     const card = document.createElement('div');
     card.className = 'zone-pick-card fetchable';
     card.dataset.card = cmd.name;
     card.style.cursor = 'pointer';
-    if (cmd.name === currentName) card.style.borderColor = 'var(--gold,#c8a96e)';
 
     const sf = scryfallCards.get(cmd.name);
     const imgUrl = sfFaceImg(sf, cmd.name);
-    const isCurrentStr = cmd.name === currentName ? ' ✓' : '';
-    card.innerHTML = imgUrl
-      ? `<img src="${esc(imgUrl)}" alt="${esc(cmd.name)}">`
-      : `<div style="padding:6px;font-size:0.6rem;color:var(--text-primary);background:var(--bg-elevated);min-height:80px;display:flex;align-items:center;justify-content:center">${esc(cmd.name)}</div>`;
-    card.innerHTML += `<span class="zone-pick-card-name">${esc(cmd.name)}${isCurrentStr}</span>`;
-    if (!imgUrl) fetchCardImage(cmd.name).then(u => {
-      if (u) card.innerHTML = `<img src="${esc(u)}" alt="${esc(cmd.name)}"><span class="zone-pick-card-name">${esc(cmd.name)}${isCurrentStr}</span>`;
-    });
+    const renderCard = (url) => {
+      card.innerHTML = url
+        ? `<img src="${esc(url)}" alt="${esc(cmd.name)}">`
+        : `<div style="padding:6px;font-size:0.6rem;color:var(--text-primary);background:var(--bg-elevated);min-height:80px;display:flex;align-items:center;justify-content:center">${esc(cmd.name)}</div>`;
+      card.innerHTML += `<span class="zone-pick-card-name">${esc(cmd.name)}</span>`;
+    };
+    renderCard(imgUrl);
+    if (!imgUrl) fetchCardImage(cmd.name).then(u => { if (u) renderCard(u); });
 
-    card.addEventListener('click', () => { modal.remove(); onSelect(cmd.name); });
+    card.addEventListener('click', () => {
+      if (selected.has(cmd.name)) {
+        selected.delete(cmd.name);
+        card.style.borderColor = '';
+        card.style.outline = '';
+      } else {
+        if (!isPartner) {
+          // Single select: resolve immediately
+          resolve([cmd.name]);
+          return;
+        }
+        if (selected.size < maxSelect) {
+          selected.add(cmd.name);
+          card.style.borderColor = 'var(--gold,#c8a96e)';
+          card.style.outline = '2px solid var(--gold,#c8a96e)';
+        }
+      }
+      updateConfirm();
+    });
     grid.appendChild(card);
   }
 
+  confirmBtn.addEventListener('click', () => resolve([...selected]));
+
   const keepBtn = document.createElement('button');
   keepBtn.className = 'btn-secondary';
-  keepBtn.textContent = 'Garder ' + (currentName || 'commandant actuel');
+  keepBtn.textContent = 'Garder les commandants actuels';
   keepBtn.style.cssText = 'align-self:center;margin-top:4px';
-  keepBtn.addEventListener('click', () => { modal.remove(); onSelect(currentName); });
+  keepBtn.addEventListener('click', () => resolve([]));
 
-  // Click outside the box → keep current commander (never leaves promise hanging)
-  modal.addEventListener('click', e => {
-    if (e.target === modal) { modal.remove(); onSelect(currentName); }
-  });
-
-  // Escape key → keep current commander
-  const onKey = e => {
-    if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); modal.remove(); onSelect(currentName); }
-  };
+  modal.addEventListener('click', e => { if (e.target === modal) resolve([]); });
+  const onKey = e => { if (e.key === 'Escape') resolve([]); };
   document.addEventListener('keydown', onKey);
 
   box.appendChild(grid);
+  if (isPartner) box.appendChild(confirmBtn);
   box.appendChild(keepBtn);
   modal.appendChild(box);
   document.body.appendChild(modal);
@@ -1495,11 +1476,16 @@ function applyAttachments(zoneEls, attached) {
     const stack = document.createElement('div');
     stack.className = 'bf-attached-stack';
 
-    for (const aura of auras) {
+    for (let i = 0; i < auras.length; i++) {
+      const aura = auras[i];
       const el = document.createElement('div');
       el.className = 'bf-attached-card';
       el.dataset.card = aura.englishName || aura.name;
       el.dataset.cardId = aura.id;
+      // Cascade bottom-right: each card offset from the previous
+      el.style.left = (30 + i * 10) + 'px';
+      el.style.top  = (52 + i * 10) + 'px';
+      el.style.zIndex = 6 + i;
 
       const cached = scryfallCache.get(aura.englishName || aura.name) || '';
       if (cached) {
@@ -2364,6 +2350,11 @@ function renderDecision(decision) {
     passBtn.classList.add('hidden');
     if (!document.getElementById('choose-type-modal')) showChooseTypeModal(data);
 
+  } else if (type === 'CHOOSE_COLOR') {
+    bar.classList.add('hidden');
+    passBtn.classList.add('hidden');
+    if (!document.getElementById('choose-color-modal')) showChooseColorModal(data);
+
   } else if (type === 'CHOOSE_CARD_NAME') {
     bar.classList.add('hidden');
     passBtn.classList.add('hidden');
@@ -2438,6 +2429,54 @@ function showChooseOptionModal(data, onChoice) {
     skip.onclick = async () => { modal.remove(); await onChoice(null); pausePolling = false; };
     btnRow.appendChild(skip);
   }
+
+  modal.appendChild(btnRow);
+  document.body.appendChild(modal);
+}
+
+// ── Color picker modal ───────────────────────────────────────────────────────
+// Used for CHOOSE_COLOR (Skrelv, protection effects, etc.)
+function showChooseColorModal(data) {
+  document.getElementById('choose-color-modal')?.remove();
+  pausePolling = true;
+
+  const COLOR_META = {
+    White:     { code: 'W', bg: '#f5f0dc', fg: '#2a2000', symbol: '{W}' },
+    Blue:      { code: 'U', bg: '#1a3a6b', fg: '#d0e8ff', symbol: '{U}' },
+    Black:     { code: 'B', bg: '#1a1a1a', fg: '#d0c8f0', symbol: '{B}' },
+    Red:       { code: 'R', bg: '#8b1a10', fg: '#ffe0c0', symbol: '{R}' },
+    Green:     { code: 'G', bg: '#1a4a20', fg: '#c0f0c0', symbol: '{G}' },
+    Colorless: { code: 'C', bg: '#444',    fg: '#ccc',    symbol: '{C}' },
+  };
+
+  const modal = document.createElement('div');
+  modal.id = 'choose-color-modal';
+  modal.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);' +
+    'background:var(--bg-elevated);border:1px solid var(--gold);border-radius:10px;' +
+    'z-index:500;padding:18px 20px;min-width:260px;box-shadow:0 16px 48px rgba(0,0,0,0.9)';
+
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:0.82rem;font-weight:700;color:var(--gold);margin-bottom:14px;text-align:center;letter-spacing:0.06em;text-transform:uppercase';
+  title.textContent = (data.prompt || 'Choisissez une couleur') + (data.card ? ' — ' + data.card : '');
+  modal.appendChild(title);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:center';
+
+  const colors = data.colors || ['White', 'Blue', 'Black', 'Red', 'Green'];
+  colors.forEach(colorName => {
+    const meta = COLOR_META[colorName] || { code: colorName[0], bg: '#555', fg: '#fff' };
+    const btn = document.createElement('button');
+    btn.style.cssText = `min-width:72px;padding:8px 10px;border-radius:6px;border:2px solid rgba(255,255,255,0.15);` +
+      `background:${meta.bg};color:${meta.fg};font-weight:700;font-size:0.85rem;cursor:pointer;`;
+    btn.textContent = colorName;
+    btn.onclick = async () => {
+      modal.remove();
+      pausePolling = false;
+      await sendDecision({ color: colorName });
+    };
+    btnRow.appendChild(btn);
+  });
 
   modal.appendChild(btnRow);
   document.body.appendChild(modal);

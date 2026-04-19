@@ -36,6 +36,8 @@ public class GameSession {
     private volatile String gameError = null;
     private volatile boolean debug = false;
     private volatile long lastActivity = System.currentTimeMillis();
+    private volatile String concedeWinner = null;      // set when player 1 concedes
+    private volatile int forcedFirstPlayerIndex = -1;  // -1 = coin toss, 0/1 = forced
 
     // Partner lock: card IDs of commanders that are permanently locked (Duel Commander rule)
     private final java.util.Set<Integer> lockedPartnerIds = Collections.synchronizedSet(new java.util.HashSet<>());
@@ -71,11 +73,25 @@ public class GameSession {
         if (t != null && t.isAlive()) t.interrupt();
     }
 
+    /** Wait up to {@code millis} ms for the game thread to finish. */
+    public void joinGameThread(long millis) {
+        Thread t = gameThread;
+        if (t != null && t.isAlive()) {
+            try { t.join(millis); } catch (InterruptedException ignored) {}
+        }
+    }
+
     public void setGameOver(boolean over) { this.gameOver = over; }
     public boolean isGameOver() { return gameOver; }
 
     public void setGameError(String err) { this.gameError = err; gameOver = true; }
     public String getGameError() { return gameError; }
+
+    public String getConcedeWinner() { return concedeWinner; }
+    public void setConcedeWinner(String w) { this.concedeWinner = w; }
+
+    public int getForcedFirstPlayerIndex() { return forcedFirstPlayerIndex; }
+    public void setForcedFirstPlayerIndex(int idx) { this.forcedFirstPlayerIndex = idx; }
 
     public java.util.Set<Integer> getLockedPartnerIds() { return lockedPartnerIds; }
     public void setLockedPartnerIds(java.util.Set<Integer> ids) { lockedPartnerIds.clear(); lockedPartnerIds.addAll(ids); }
@@ -215,9 +231,11 @@ public class GameSession {
         // Pending decision
         state.put("pendingDecision", pendingDecision);
 
-        // Winner
+        // Winner (concede sets concedeWinner immediately; normal game-over uses Forge outcome)
         try {
-            if (game.isGameOver() && game.getOutcome() != null) {
+            if (concedeWinner != null) {
+                state.put("winner", concedeWinner);
+            } else if (game.isGameOver() && game.getOutcome() != null) {
                 if (game.getOutcome().isDraw()) {
                     state.put("winner", "DRAW");
                 } else if (game.getOutcome().getWinningLobbyPlayer() != null) {

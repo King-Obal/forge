@@ -7,6 +7,7 @@ import forge.ai.LobbyPlayerAi;
 import forge.api.game.GameSession;
 import forge.api.game.GameSessionManager;
 import forge.api.game.LobbyPlayerApi;
+import forge.api.game.PlayerControllerApi;
 import forge.api.game.PlayerControllerPassive;
 import forge.deck.Deck;
 import forge.item.PaperCard;
@@ -54,12 +55,16 @@ public class GameServlet extends HttpServlet {
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        System.out.println("[doPost] " + req.getRequestURI());
         cors(resp);
         resp.setContentType("application/json;charset=UTF-8");
         String uri = req.getRequestURI(); // e.g. /api/game/start
 
         if (uri.endsWith("/game/start")) {
             handleStart(req, resp);
+        } else if (uri.contains("/game/") && uri.endsWith("/concede")) {
+            String id = extractId(uri, "/concede");
+            handleConcede(id, resp);
         } else if (uri.contains("/game/") && uri.endsWith("/respond")) {
             String id = extractId(uri, "/respond");
             handleRespond(id, req, resp);
@@ -94,6 +99,7 @@ public class GameServlet extends HttpServlet {
 
     @Override
     protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        System.out.println("[doDelete] " + req.getRequestURI());
         cors(resp);
         resp.setContentType("application/json;charset=UTF-8");
         String uri = req.getRequestURI();
@@ -111,6 +117,7 @@ public class GameServlet extends HttpServlet {
     // ── POST /api/game/start ─────────────────────────────────────────────────
 
     private void handleStart(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        System.out.println("[handleStart] POST /api/game/start received");
         Map<?, ?> body;
         try {
             body = mapper.readValue(req.getInputStream(), Map.class);
@@ -124,6 +131,8 @@ public class GameServlet extends HttpServlet {
         String deck2Name = getString(body, "deck2");
         String formatStr = getString(body, "format");
         String commander1Name = getString(body, "commander1");
+        String commander2Name = getString(body, "commander2");
+        int goFirstPlayerIndex = body.get("goFirstPlayerIndex") instanceof Number n ? n.intValue() : -1;
         boolean isDebug = Boolean.TRUE.equals(body.get("debug"));
 
         if (deck1Name == null || deck1Name.isEmpty() || deck2Name == null || deck2Name.isEmpty()) {
@@ -153,12 +162,15 @@ public class GameServlet extends HttpServlet {
         // Create session immediately — respond to client before starting the game (avoid socket hang up)
         GameSession session = GameSessionManager.getInstance().create();
         if (isDebug) session.setDebug(true);
+        if (goFirstPlayerIndex >= 0) session.setForcedFirstPlayerIndex(goFirstPlayerIndex);
 
         final Deck fd1 = d1, fd2 = d2;
         final boolean fIsCommander = isCommander;
         final GameType fGameType = gameType;
         final String fCommander1Name = commander1Name;
+        final String fCommander2Name = commander2Name;
         final boolean fIsDebug = isDebug;
+        final int fGoFirstPlayerIndex = goFirstPlayerIndex;
 
         // Everything game-related runs in background thread
         Thread gameThread = new Thread(() -> {
@@ -172,27 +184,30 @@ public class GameServlet extends HttpServlet {
                 RegisteredPlayer rp1 = fIsCommander ? RegisteredPlayer.forCommander(fd1) : new RegisteredPlayer(fd1);
                 rp1.setPlayer(lp1);
                 if (fIsCommander) rp1.setStartingLife(20);
-                // Apply commander swap if specified
+                // Apply commander swap if specified (supports 1 or 2 commanders for partner)
                 if (fIsCommander && fCommander1Name != null && !fCommander1Name.isEmpty()) {
-                    PaperCard selected = null;
-                    boolean fromMain = false;
-                    for (PaperCard pc : fd1.getCommanders()) {
-                        if (fCommander1Name.equals(pc.getName())) { selected = pc; break; }
-                    }
-                    if (selected == null && fd1.getMain() != null) {
-                        for (PaperCard pc : fd1.getMain().toFlatList()) {
-                            if (fCommander1Name.equals(pc.getName())) { selected = pc; fromMain = true; break; }
+                    List<PaperCard> chosen = new java.util.ArrayList<>();
+                    PaperCard[] removedFromMainArr = {null, null};
+                    for (String cName : new String[]{fCommander1Name, fCommander2Name}) {
+                        if (cName == null || cName.isEmpty()) continue;
+                        PaperCard found = null; boolean fromMain = false;
+                        for (PaperCard pc : fd1.getCommanders()) {
+                            if (cName.equals(pc.getName())) { found = pc; break; }
+                        }
+                        if (found == null && fd1.getMain() != null) {
+                            for (PaperCard pc : fd1.getMain().toFlatList()) {
+                                if (cName.equals(pc.getName())) { found = pc; fromMain = true; break; }
+                            }
+                        }
+                        if (found != null) {
+                            chosen.add(found);
+                            if (fromMain) {
+                                fd1.getMain().remove(found);
+                                removedFromMain[0] = removedFromMain[0] == null ? found : removedFromMain[0];
+                            }
                         }
                     }
-                    if (selected != null) {
-                        rp1.setCommanders(List.of(selected));
-                        // Card came from library — remove it temporarily so it doesn't end up in
-                        // both the command zone and the library at the same time.
-                        if (fromMain) {
-                            fd1.getMain().remove(selected);
-                            removedFromMain[0] = selected;
-                        }
-                    }
+                    if (!chosen.isEmpty()) rp1.setCommanders(chosen);
                 }
                 RegisteredPlayer rp2 = fIsCommander ? RegisteredPlayer.forCommander(fd2) : new RegisteredPlayer(fd2);
                 if (fIsDebug) {
@@ -206,6 +221,22 @@ public class GameServlet extends HttpServlet {
                         }
                     };
                     rp2.setPlayer(passiveLobby);
+                } else if (fGoFirstPlayerIndex >= 0) {
+                    // Override AI's chooseStartingPlayer to respect the forced starting player
+                    rp2.setPlayer(new LobbyPlayerAi(p2Name, null) {
+                        @Override
+                        public forge.game.player.Player createIngamePlayer(forge.game.Game g, int pid) {
+                            forge.game.player.Player ai = new forge.game.player.Player(getName(), g, pid);
+                            ai.setFirstController(new forge.ai.PlayerControllerAi(g, ai, this) {
+                                @Override
+                                public forge.game.player.Player chooseStartingPlayer(boolean isFirstGame) {
+                                    java.util.List<forge.game.player.Player> pl = new java.util.ArrayList<>(g.getPlayers());
+                                    return fGoFirstPlayerIndex < pl.size() ? pl.get(fGoFirstPlayerIndex) : ai;
+                                }
+                            });
+                            return ai;
+                        }
+                    });
                 } else {
                     rp2.setPlayer(GamePlayerUtil.createAiPlayer(p2Name, 1));
                 }
@@ -219,6 +250,8 @@ public class GameServlet extends HttpServlet {
                 session.setGame(game);
 
                 match.startGame(game);
+            } catch (PlayerControllerApi.GameAbortedException e) {
+                // Session was killed via DELETE — exit cleanly, no error to report
             } catch (Exception | Error e) {
                 System.err.println("[GameSession] Error: " + e);
                 e.printStackTrace();
@@ -329,7 +362,7 @@ public class GameServlet extends HttpServlet {
             }
         }
 
-        mapper.writeValue(resp.getWriter(), Map.of("commanders", result));
+        mapper.writeValue(resp.getWriter(), Map.of("commanders", result, "designatedCount", deck.getCommanders().size()));
     }
 
     // ── POST /api/game/{id}/debug/add-card ───────────────────────────────────
@@ -452,6 +485,35 @@ public class GameServlet extends HttpServlet {
         Player player = players.get(playerIndex);
         player.setLife(life, null);
         mapper.writeValue(resp.getWriter(), Map.of("ok", true, "player", player.getName(), "life", life));
+    }
+
+    // ── POST /api/game/{id}/concede ──────────────────────────────────────────
+
+    private void handleConcede(String id, HttpServletResponse resp) throws IOException {
+        GameSession session = GameSessionManager.getInstance().get(id);
+        if (session == null) {
+            resp.setStatus(404);
+            mapper.writeValue(resp.getWriter(), error("Session not found: " + id));
+            return;
+        }
+        forge.game.Game game = session.getGame();
+        // Mark session over immediately so the next poll returns gameOver=true
+        session.setGameOver(true);
+        session.setConcedeWinner("AI"); // player 1 conceded → AI wins
+        if (game != null) {
+            try {
+                java.util.List<Player> players = new java.util.ArrayList<>(game.getPlayers());
+                if (!players.isEmpty()) {
+                    players.get(0).concede();
+                }
+            } catch (Exception e) {
+                System.err.println("[concede] error: " + e);
+            }
+        }
+        // Unblock any pending decision and interrupt AI computation
+        session.receiveDecision(Map.of("choice", "pass"));
+        session.interruptGameThread();
+        mapper.writeValue(resp.getWriter(), Map.of("ok", true));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

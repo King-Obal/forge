@@ -13,8 +13,7 @@
   <header class="topbar">
     <span class="logo">FORGE</span>
     <nav class="tabs">
-      <button class="tab active" data-view="simulate">Simulate</button>
-      <button class="tab" data-view="decks">Decks</button>
+      <button class="tab active" data-view="decks">Decks</button>
       <button class="tab" data-view="play">Play</button>
       <button class="tab" data-view="builder">Builder</button>
     </nav>
@@ -60,57 +59,9 @@
   <!-- Main content area -->
   <main class="content">
 
-    <!-- ── SIMULATE VIEW ─────────────────────────────── -->
-    <section class="view active" id="view-simulate">
-      <div class="panel setup-panel">
-        <h2>AI vs AI Simulation</h2>
-
-        <div class="match-setup">
-          <div class="player-slot">
-            <label>Player 1 — Deck</label>
-            <select id="deck1" class="deck-select">
-              <option value="">Loading decks…</option>
-            </select>
-          </div>
-
-          <div class="vs-badge">VS</div>
-
-          <div class="player-slot">
-            <label>Player 2 — Deck</label>
-            <select id="deck2" class="deck-select">
-              <option value="">Loading decks…</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="format-row">
-          <label>Format</label>
-          <select id="format" class="format-select">
-            <option value="Constructed">Constructed</option>
-            <option value="Commander">Commander</option>
-          </select>
-          <label>Timeout (s)</label>
-          <input id="timeout" type="number" value="120" min="10" max="600" class="timeout-input">
-        </div>
-
-        <button id="btn-simulate" class="btn-primary">▶ Run Simulation</button>
-      </div>
-
-      <!-- Results -->
-      <div class="panel result-panel hidden" id="result-panel">
-        <div class="result-header">
-          <div id="result-winner" class="winner-badge"></div>
-          <div id="result-meta" class="result-meta"></div>
-          <button id="btn-copy-log" class="btn-secondary">Copy Log</button>
-        </div>
-        <div class="log-container">
-          <div id="game-log" class="game-log"></div>
-        </div>
-      </div>
-    </section>
 
     <!-- ── DECKS VIEW ────────────────────────────────── -->
-    <section class="view" id="view-decks">
+    <section class="view active" id="view-decks">
       <div class="deck-view-toolbar">
         <select id="deck-view-format" class="deck-view-ctrl">
           <option value="Commander">Commander</option>
@@ -124,6 +75,7 @@
           <button class="group-btn active" data-group="type">Type</button>
           <button class="group-btn" data-group="cmc">CMC</button>
           <button class="group-btn" data-group="color">Color</button>
+          <button class="group-btn" data-group="type+cmc">Type + CMC</button>
         </div>
       </div>
       <div id="deck-grid" class="deck-grid">
@@ -391,6 +343,7 @@
 
         <div class="play-board-footer">
           <button id="btn-play-stop" class="btn-secondary">✕ Abandon Game</button>
+          <button id="btn-concede" class="btn-secondary" style="margin-left:6px;background:#5a1a1a;">🏳 Concéder</button>
           <span id="match-score" class="match-score-badge"></span>
           <span id="play-winner" class="play-winner-badge hidden"></span>
         </div>

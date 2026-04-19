@@ -56,6 +56,11 @@ import java.util.function.Predicate;
  */
 public class PlayerControllerApi extends PlayerController {
 
+    /** Thrown when the session is killed via DELETE while the game thread is waiting. */
+    public static class GameAbortedException extends RuntimeException {
+        public GameAbortedException() { super("Game session aborted", null, true, false); }
+    }
+
     private final GameSession session;
     private final int playerIndex;
     private volatile byte pendingManaColorMask = 0;
@@ -65,6 +70,16 @@ public class PlayerControllerApi extends PlayerController {
         super(game, player, lobbyPlayer);
         this.session = session;
         this.playerIndex = playerIndex;
+    }
+
+    /**
+     * Wraps session.awaitDecision: if the session is flagged as over (DELETE was called),
+     * throws GameAbortedException to unwind the game thread cleanly.
+     */
+    private Map<String, Object> awaitOrAbort(long timeout, TimeUnit unit) {
+        Map<String, Object> response = session.awaitDecision(timeout, unit);
+        if (session.isGameOver()) throw new GameAbortedException();
+        return response;
     }
 
     // ── MAIN interactive decision ─────────────────────────────────────────────
@@ -160,7 +175,7 @@ public class PlayerControllerApi extends PlayerController {
 
         // Always ask the player — no auto-pass. Player 1 manually validates every priority window.
         session.publishDecision("CHOOSE_ACTION", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(10, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(10, TimeUnit.MINUTES);
 
         if (response == null) return null;
         String choice = (String) response.get("choice");
@@ -292,7 +307,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("defenders", defenderOptions);
         if (!requiredIds.isEmpty()) data.put("requiredAttackers", requiredIds);
         session.publishDecision("DECLARE_ATTACKERS", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(10, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(10, TimeUnit.MINUTES);
         if (response == null) return;
 
         // Expected format: assignments = ["5:P1", "7:P1"]  (cardId:targetId)
@@ -354,7 +369,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("blockers", blockerOptions);
         data.put("attackers", attackerList);
         session.publishDecision("DECLARE_BLOCKERS", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(10, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(10, TimeUnit.MINUTES);
         if (response == null) return;
 
         // Expected format: assignments = ["3:5", "4:5"]  (blockerId:attackerId)
@@ -398,7 +413,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("hand", hand);
         data.put("cardsToReturn", cardsToReturn);
         session.publishDecision("MULLIGAN", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return true; // auto-keep on timeout
         Object keep = response.get("keep");
         if (keep instanceof Boolean) return (Boolean) keep;
@@ -465,7 +480,7 @@ public class PlayerControllerApi extends PlayerController {
                         data.put("prompt", "Mana phyrexian (" + cardName + ") : payer 2 PV au lieu de mana coloré ?");
                         data.put("card", cardName);
                         session.publishDecision("CONFIRM_ACTION", playerIndex, data);
-                        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+                        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
                         if (response != null && "yes".equals(response.get("choice"))) chosen = 1;
                     } else {
                         // Multiple symbols: choose how many (0..maxWithLife)
@@ -559,7 +574,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("prompt", "Déclencher : " + wrapperAbility.getDescription() + " ?");
         data.put("optional", true);
         session.publishDecision("CONFIRM_TRIGGER", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return true; // auto-yes on timeout
         Object choice = response.get("choice");
         return !"no".equals(choice) && !"false".equals(String.valueOf(choice));
@@ -714,7 +729,7 @@ public class PlayerControllerApi extends PlayerController {
         }
 
         session.publishDecision("CHOOSE_TARGETS", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
 
         if (response == null) return minT == 0;
         Object chosenRaw = response.get("targets");
@@ -885,7 +900,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("card", card);
         data.put("options", labels);
         session.publishDecision("CHOOSE_MANA_COMBO", playerIndex, data);
-        Map<String, Object> resp = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> resp = awaitOrAbort(5, TimeUnit.MINUTES);
 
         int idx = 0;
         if (resp != null && resp.get("choice") instanceof String chosen) {
@@ -933,7 +948,19 @@ public class PlayerControllerApi extends PlayerController {
     }
 
     @Override
-    public Integer announceRequirements(SpellAbility ability, String announce) { return 0; }
+    public Integer announceRequirements(SpellAbility ability, String announce) {
+        String cardName = ability != null && ability.getHostCard() != null ? ability.getHostCard().getName() : null;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("prompt", "Choisir la valeur de " + (announce != null ? announce : "X"));
+        data.put("min", 0);
+        data.put("max", 99);
+        if (cardName != null) data.put("card", cardName);
+        session.publishDecision("CHOOSE_NUMBER", playerIndex, data);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
+        if (response == null) return 0;
+        Object v = response.get("number");
+        return v instanceof Number ? ((Number) v).intValue() : 0;
+    }
 
     @Override
     public TargetChoices chooseNewTargetsFor(SpellAbility ability, Predicate<GameObject> filter, boolean optional) {
@@ -1013,7 +1040,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("optional", isOptional);
         data.put("destination", "HAND"); // unused but required by modal
         session.publishDecision("CHOOSE_CARD", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return isOptional ? null : indexed.get(0);
         Object idObj = response.get("cardId");
         if (idObj instanceof Number id) {
@@ -1051,7 +1078,7 @@ public class PlayerControllerApi extends PlayerController {
         // Multi-select mode when max > 1
         if (max > 1) data.put("multiSelect", true);
         session.publishDecision("CHOOSE_CARD", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return isOptional ? new CardCollection() : takeFirst(sourceList, min);
         // Multi-select response: { cardIds: [id1, id2, ...] }
         Object idsObj = response.get("cardIds");
@@ -1101,7 +1128,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("max", max);
         data.put("destination", "HAND");
         session.publishDecision("CHOOSE_CARD", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return isOptional ? new ArrayList<>() : new ArrayList<>(List.of(indexed.get(0)));
 
         Object idObj = response.get("cardId");
@@ -1135,7 +1162,7 @@ public class PlayerControllerApi extends PlayerController {
             data.put("prompt", message);
             if (cardToShow != null) data.put("card", cardToShow.getName());
             session.publishDecision("CONFIRM_ACTION", playerIndex, data);
-            Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+            Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
             if (response == null) return false;
             Object choice = response.get("choice");
             return "yes".equals(choice) || "true".equals(String.valueOf(choice));
@@ -1164,7 +1191,7 @@ public class PlayerControllerApi extends PlayerController {
         if (cardToShow != null) data.put("card", cardToShow.getName());
         data.put("options", options != null ? options : List.of("Oui", "Non"));
         session.publishDecision("CONFIRM_ACTION", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return false; // safe default: don't do the action
         Object choice = response.get("choice");
         return "yes".equals(choice) || "true".equals(String.valueOf(choice));
@@ -1184,7 +1211,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("prompt", question);
         if (affected instanceof Card c) data.put("card", c.getName());
         session.publishDecision("CONFIRM_ACTION", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return true;
         Object choice = response.get("choice");
         return !"no".equals(choice) && !"false".equals(String.valueOf(choice));
@@ -1209,7 +1236,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("prompt", "Payer " + cost + " pour : " + wrapper.getDescription() + " ?");
         data.put("optional", true);
         session.publishDecision("CONFIRM_TRIGGER", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return true;
         Object choice = response.get("choice");
         return !"no".equals(choice) && !"false".equals(String.valueOf(choice));
@@ -1254,7 +1281,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("prompt", title + " (" + cards.size() + " carte" + (cards.size() > 1 ? "s" : "") + ")");
         data.put("cards", cardList);
         session.publishDecision("REVEAL_CARDS", playerIndex, data);
-        try { session.awaitDecision(10, TimeUnit.MINUTES); } catch (Exception ignored) {}
+        try { awaitOrAbort(10, TimeUnit.MINUTES); } catch (Exception ignored) {}
     }
 
     @Override
@@ -1286,7 +1313,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("keepZone", keepZone);
         data.put("discardZone", discardZone);
         session.publishDecision(decisionType, playerIndex, data);
-        Map<String, Object> resp = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> resp = awaitOrAbort(5, TimeUnit.MINUTES);
 
         CardCollection toKeep = new CardCollection();
         CardCollection toDiscard = new CardCollection();
@@ -1344,7 +1371,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("prompt", "Arrange les cartes de haut en bas (gauche = dessus de la bibliothèque)");
         data.put("spell", source != null && source.getHostCard() != null ? source.getHostCard().getName() : "");
         session.publishDecision("ORDER_ZONE", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return cards;
 
         Object orderedRaw = response.get("order");
@@ -1423,6 +1450,12 @@ public class PlayerControllerApi extends PlayerController {
 
     @Override
     public Player chooseStartingPlayer(boolean isFirstGame) {
+        // Respect forced starting player (set when loser of previous game should go first)
+        int forced = session.getForcedFirstPlayerIndex();
+        if (forced >= 0) {
+            java.util.List<Player> players = new java.util.ArrayList<>(getGame().getPlayers());
+            return forced < players.size() ? players.get(forced) : player;
+        }
         // Find the opponent
         Player opponent = null;
         for (Player p : getGame().getPlayers()) {
@@ -1433,7 +1466,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("chooserName", player.getName());
         data.put("opponentName", opponent != null ? opponent.getName() : "AI");
         session.publishDecision("CHOOSE_STARTING_PLAYER", playerIndex, data);
-        Map<String, Object> resp = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> resp = awaitOrAbort(5, TimeUnit.MINUTES);
         boolean goFirst = true;
         if (resp != null && resp.get("goFirst") instanceof Boolean b) goFirst = b;
         return goFirst ? player : (opponent != null ? opponent : player);
@@ -1441,12 +1474,13 @@ public class PlayerControllerApi extends PlayerController {
 
     @Override
     public void notifyTossResult(String tossWinnerName, String firstPlayerName, boolean isFirstGame) {
+        if (session.getForcedFirstPlayerIndex() >= 0) return; // no toss on game 2/3
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("isFirstGame", isFirstGame);
         data.put("tossWinnerName", tossWinnerName);
         data.put("firstPlayerName", firstPlayerName);
         session.publishDecision("TOSS_RESULT", playerIndex, data);
-        session.awaitDecision(2, TimeUnit.MINUTES);
+        awaitOrAbort(2, TimeUnit.MINUTES);
     }
 
     @Override
@@ -1470,7 +1504,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("optional", isOptional);
         if (cardName != null) data.put("card", cardName);
         session.publishDecision("CHOOSE_TYPE", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return isOptional ? null : types.get(0);
         Object v = response.get("type");
         String chosen = v instanceof String s ? s : null;
@@ -1548,7 +1582,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("cardsToReturn", cardsToReturn);
         data.put("prompt", "Choisir " + cardsToReturn + " carte(s) à mettre en dessous de la bibliothèque");
         session.publishDecision("MULLIGAN_TUCK", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(10, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(10, TimeUnit.MINUTES);
 
         CardCollection result = new CardCollection();
         if (response != null) {
@@ -1593,7 +1627,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("allowRepeat", allowRepeat);
         data.put("card", sa.getHostCard() != null ? sa.getHostCard().getName() : "");
         session.publishDecision("CHOOSE_MODE", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         List<AbilitySub> chosen;
         if (response == null) {
             chosen = new ArrayList<>(possible.subList(0, Math.min(num, possible.size())));
@@ -1643,7 +1677,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("max", max);
         data.put("card", sa != null && sa.getHostCard() != null ? sa.getHostCard().getName() : "");
         session.publishDecision("CHOOSE_NUMBER", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return min;
         Object val = response.get("number");
         if (val instanceof Number) return Math.max(min, Math.min(max, ((Number) val).intValue()));
@@ -1659,7 +1693,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("values", values);
         data.put("card", sa != null && sa.getHostCard() != null ? sa.getHostCard().getName() : "");
         session.publishDecision("CHOOSE_NUMBER", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return values.get(0);
         Object val = response.get("number");
         if (val instanceof Number) {
@@ -1678,7 +1712,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("kindOfChoice", kindOfChoice != null ? kindOfChoice.name() : "YesOrNo");
         if (sa != null && sa.getHostCard() != null) data.put("card", sa.getHostCard().getName());
         session.publishDecision("CHOOSE_BINARY", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return defaultChoice != null ? defaultChoice : false;
         Object v = response.get("choice");
         return "yes".equals(v) || "true".equals(String.valueOf(v));
@@ -1693,24 +1727,47 @@ public class PlayerControllerApi extends PlayerController {
     public byte chooseColor(String message, SpellAbility sa, ColorSet colors) {
         byte pending = pendingManaColorMask;
         if (pending != 0) {
-            // Use requested color if it's in the available set; keep mask for subsequent calls (e.g. Amount$ 2)
             for (MagicColor.Color c : colors) {
                 if (c.getColorMask() == pending) return pending;
             }
         }
-        return Iterables.getFirst(colors, MagicColor.Color.WHITE).getColorMask();
+        return askChooseColor(message, sa != null ? sa.getHostCard() : null, colors, false);
     }
 
     @Override
     public byte chooseColorAllowColorless(String message, Card c, ColorSet colors) {
         byte pending = pendingManaColorMask;
         if (pending != 0) {
-            // Keep mask for subsequent calls within the same activation
             for (MagicColor.Color col : colors) {
                 if (col.getColorMask() == pending) return pending;
             }
         }
-        return Iterables.getFirst(colors, MagicColor.Color.COLORLESS).getColorMask();
+        return askChooseColor(message, c, colors, true);
+    }
+
+    private byte askChooseColor(String message, Card sourceCard, ColorSet colors, boolean allowColorless) {
+        byte fallback = allowColorless
+                ? Iterables.getFirst(colors, MagicColor.Color.COLORLESS).getColorMask()
+                : Iterables.getFirst(colors, MagicColor.Color.WHITE).getColorMask();
+        // Only ask interactively when there are multiple options
+        int count = 0; for (MagicColor.Color ignored2 : colors) count++;
+        if (count <= 1) return fallback;
+
+        List<String> colorNames = new ArrayList<>();
+        for (MagicColor.Color c : colors) colorNames.add(MagicColor.toLongString(c.getColorMask()));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("prompt", message != null && !message.isBlank() ? message : "Choisissez une couleur");
+        data.put("colors", colorNames);
+        if (sourceCard != null) data.put("card", sourceCard.getName());
+        session.publishDecision("CHOOSE_COLOR", playerIndex, data);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
+        if (response == null) return fallback;
+        Object v = response.get("color");
+        if (v instanceof String s) {
+            byte mask = MagicColor.fromName(s);
+            if (mask != 0 && colors.hasAnyColor(mask)) return mask;
+        }
+        return fallback;
     }
 
     @Override
@@ -1820,7 +1877,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("costDesc", costDesc);
         data.put("card", sa.getHostCard().getName());
         session.publishDecision("CONFIRM_COST", playerIndex, data);
-        Map<String, Object> resp = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> resp = awaitOrAbort(5, TimeUnit.MINUTES);
         if (resp == null) return false;
         Object v = resp.get("confirmed");
         boolean confirmed = v instanceof Boolean ? (Boolean) v : Boolean.parseBoolean(String.valueOf(v));
@@ -1848,7 +1905,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("prompt", message != null ? message : "Nommer une carte");
         if (sa != null && sa.getHostCard() != null) data.put("card", sa.getHostCard().getName());
         session.publishDecision("CHOOSE_CARD_NAME", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(10, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(10, TimeUnit.MINUTES);
         if (response == null) return "";
         Object v = response.get("cardName");
         return v instanceof String s ? s : "";
@@ -1879,7 +1936,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("optional", isOptional);
         data.put("destination", destination != null ? destination.name() : "");
         session.publishDecision("CHOOSE_CARD", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(10, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(10, TimeUnit.MINUTES);
         if (response == null) return isOptional ? null : Iterables.getFirst(fetchList, null);
         Object idObj = response.get("cardId");
         if (idObj instanceof Number) {
@@ -1938,7 +1995,7 @@ public class PlayerControllerApi extends PlayerController {
         data.put("optional", optional);
         if (cardName != null && !cardName.isEmpty()) data.put("card", cardName);
         session.publishDecision("CHOOSE_OPTION", playerIndex, data);
-        Map<String, Object> response = session.awaitDecision(5, TimeUnit.MINUTES);
+        Map<String, Object> response = awaitOrAbort(5, TimeUnit.MINUTES);
         if (response == null) return optional ? null : options.get(0);
         Object v = response.get("choice");
         String chosen = v instanceof String s ? s : null;
