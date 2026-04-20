@@ -66,7 +66,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     },
-    title: 'Forge MTG'
+    title: 'Nexus'
   });
   mainWindow.on('closed', () => { mainWindow = null; });
   return mainWindow;

@@ -1,7 +1,7 @@
 {
-  "name": "forge-electron",
+  "name": "nexus",
   "version": "0.1.0",
-  "description": "MTG Forge - Modern Interface",
+  "description": "Nexus - MTG Forge Frontend",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

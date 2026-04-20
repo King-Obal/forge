@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Forge MTG — Loading</title>
+  <title>Nexus — Loading</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -37,17 +37,17 @@
   </style>
 </head>
 <body>
-  <h1>Forge</h1>
+  <h1>Nexus</h1>
   <div class="spinner"></div>
   <p>Loading card database...</p>
-  <div class="status" id="status">Initializing Forge engine (~30 seconds on first load)</div>
+  <div class="status" id="status">Initializing engine (~30 seconds on first load)</div>
 
   <script>
     let dots = 0;
     setInterval(() => {
       dots = (dots + 1) % 4;
       document.getElementById('status').textContent =
-        'Initializing Forge engine' + '.'.repeat(dots);
+        'Initializing engine' + '.'.repeat(dots);
     }, 600);
   </script>
 </body>
